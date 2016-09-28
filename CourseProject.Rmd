@@ -1,0 +1,147 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Brian O'Donnell"
+date: "September 25, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Synopsis
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## Goal
+
+The goal of this project is to predict the manner in which they did 
+the exercise. This is the "classe" variable in the training set. All
+of the other variables will be considered to make the prediction. 
+
+```{r, message = FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(AppliedPredictiveModeling)
+
+set.seed(333)
+```
+
+# Data Loading
+```{r}
+url_training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url_testing <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(url(url_training), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(url_testing), na.strings=c("NA","#DIV/0!",""))
+```
+
+# Data Partitioning
+```{r}
+inTrain <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]; 
+myTesting <- training[-inTrain, ]
+```
+# Data Cleansing & Preparation
+Identification and removal of near zero variance predictors
+```{r}
+nzv <- nearZeroVar(myTraining, saveMetrics=TRUE)
+nzv <- nearZeroVar(myTesting, saveMetrics=TRUE)
+myTrainingX <- myTraining[,nzv$nzv==FALSE]
+myTestingX <- myTesting[,nzv$nzv==FALSE]
+```
+Remove the first column
+```{r}
+myTrainingX <- myTrainingX[,-1]
+myTestingX <- myTestingX[,-1]
+```
+Clean up 'NA' in the data
+```{r}
+myTrainingX <- myTrainingX[, names(myTrainingX)[sapply(myTrainingX, function (x)
+        ! (any(is.na(x) | x == "")))]]
+myTestingX <- myTestingX[, names(myTestingX)[sapply(myTestingX, function (x)
+        ! (any(is.na(x) | x == "")))]]
+```
+
+# Prediction models
+
+## Build prediction models using Random Forests
+```{r}
+modFitRF <- randomForest(classe ~ ., data=myTrainingX)
+predictionB1 <- predict(modFitRF, myTesting, type = "class")
+cmrf <- confusionMatrix(predictionB1, myTesting$classe)
+cmrf
+
+plot(modFitRF)
+```
+
+## Build prediction models using decision trees
+```{r}
+modFitDT <- rpart(classe ~ ., data=myTrainingX, method="class")
+fancyRpartPlot(modFitDT)
+
+predictionsA1 <- predict(modFitDT, myTestingX, type = "class")
+cmtree <- confusionMatrix(predictionsA1, myTestingX$classe)
+cmtree
+```
+
+## Build prediction models using Generalized Boosted Regression
+```{r}
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+```
+
+```{r, message = FALSE}
+modFitBR <- train(classe ~ ., data=myTrainingX, method = "gbm",
+                 trControl = fitControl,
+                 verbose = FALSE)
+gbmFinMod1 <- modFitBR$finalModel
+gbmPredTest <- predict(modFitBR, newdata=myTrainingX)
+gbmAccuracyTest <- confusionMatrix(gbmPredTest, myTrainingX$classe)
+gbmAccuracyTest
+
+plot(modFitBR, ylim=c(0.9, 1))
+```
+
+# Conclusion
+Overall accuracies:
+```{r}
+cmrf$overall[1]
+cmtree$overall[1]
+gbmAccuracyTest$overall[1]
+```
+The Generalized Boosted Regression model provides the best accuracy of the three prediction models although the Random Forests model is a very close second.  Using
+Generalized Boosted Regression model on the test data:
+```{r}
+bestModelPredictions <- predict(modFitBR, newdata=testing)
+bestModelPredictions
+```
+
+# Generate output per the project requirement
+```{r}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i], file=filename, quote=FALSE, row.names=FALSE, col.names=FALSE)
+    }
+}
+pml_write_files(bestModelPredictions)
+```
